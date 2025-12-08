@@ -40,7 +40,7 @@ export default function Home() {
     }
   );
 
-  const vms: VM[] = vmData?.data || [];
+  const vms: VM[] = (vmData?.data || []).sort((a: VM, b: VM) => a.vmid - b.vmid);
   const running = vms.filter(v => v.status === 'running').length;
 
   // Determine precise status
@@ -62,46 +62,30 @@ export default function Home() {
     <div className="page-container">
       <header className="mb-8">
         <h1 className="heading-xl animate-fade-in">Cluster Overview</h1>
-        <p className="text-secondary text-lg">Manage your Proxmox virtual machines with ease.</p>
       </header>
-
-      <div className="grid-cols-2 mb-8 animate-fade-in" style={{ animationDelay: '0.1s' }}>
-        <div className="glass-panel p-6">
-          <h3 className="text-secondary uppercase text-xs font-bold tracking-wider mb-2">Total VMs</h3>
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold">{vms.length}</span>
-            <span className="text-success text-sm">
-              {running > 0 ? `+${running} running` : '0 running'}
-            </span>
-          </div>
-        </div>
-        <div className="glass-panel p-6">
-          <h3 className="text-secondary uppercase text-xs font-bold tracking-wider mb-2">Cluster Status</h3>
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full shadow-[0_0_10px] ${statusColor}`}></div>
-            <span className="text-lg font-bold">{statusText}</span>
-          </div>
-          {error && <p className="text-xs text-danger mt-2">{error.message}</p>}
-        </div>
-      </div>
 
       <div className="glass-panel p-6 animate-fade-in" style={{ animationDelay: '0.2s' }}>
         <div className="flex justify-between items-center mb-6">
-          <h2 className="heading-lg mb-0">Virtual Machines</h2>
+          <h2 className="heading-lg mb-0 flex items-center gap-3">
+            Virtual Machines{' '}
+            <span className="text-base font-normal text-secondary bg-white/5 px-2 py-1 rounded-md">
+              ({vms.length} total, {running} running)
+            </span>
+          </h2>
           <Link href="/deploy" className="btn btn-primary">
             + Deploy New VM
           </Link>
         </div>
 
         <div className="overflow-x-auto">
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--card-border)' }}>
-                <th className="text-left py-4 pl-4 text-secondary font-medium" style={{ width: '10%' }}>ID</th>
-                <th className="text-left py-4 text-secondary font-medium" style={{ width: '30%' }}>Name</th>
-                <th className="text-left py-4 text-secondary font-medium" style={{ width: '20%' }}>Status</th>
-                <th className="text-left py-4 text-secondary font-medium" style={{ width: '20%' }}>Memory</th>
-                <th className="text-left py-4 pr-4 text-secondary font-medium" style={{ width: '20%' }}>Cores</th>
+                <th className="text-left py-4 px-4 text-secondary font-medium w-[80px]">ID</th>
+                <th className="text-left py-4 px-4 text-secondary font-medium">Name</th>
+                <th className="text-left py-4 px-4 text-secondary font-medium w-[150px]">Status</th>
+                <th className="text-left py-4 px-4 text-secondary font-medium w-[150px]">Memory</th>
+                <th className="text-left py-4 px-4 text-secondary font-medium w-[120px]">Cores</th>
               </tr>
             </thead>
             <tbody>
@@ -116,9 +100,9 @@ export default function Home() {
               ) : (
                 vms.map((vm) => (
                   <tr key={vm.vmid} style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.05)' }}>
-                    <td className="py-4 pl-4 font-mono text-sm text-secondary">{vm.vmid}</td>
-                    <td className="py-4 font-bold">{vm.name}</td>
-                    <td className="py-4 text-center">
+                    <td className="py-4 px-4 font-mono text-sm text-secondary truncate">{vm.vmid}</td>
+                    <td className="py-4 px-4 font-bold truncate">{vm.name}</td>
+                    <td className="py-4 px-4 text-left">
                       <span style={{
                         display: 'inline-block',
                         padding: '0.25rem 0.75rem',
@@ -128,15 +112,14 @@ export default function Home() {
                         background: vm.status === 'running' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.1)',
                         color: vm.status === 'running' ? 'var(--success)' : 'var(--secondary)',
                         border: `1px solid ${vm.status === 'running' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(100, 116, 139, 0.2)'}`,
-                        minWidth: '80px'
                       }}>
                         {vm.status}
                       </span>
                     </td>
-                    <td className="py-4 text-right text-secondary font-mono text-sm">
+                    <td className="py-4 px-4 text-left text-secondary font-mono text-sm">
                       {vm.maxmem ? (vm.maxmem / 1024 / 1024 / 1024).toFixed(1) + ' GB' : '-'}
                     </td>
-                    <td className="py-4 pr-4 text-right text-secondary font-mono text-sm">{vm.cpus} vCores</td>
+                    <td className="py-4 px-4 text-left text-secondary font-mono text-sm">{vm.cpus} vCores</td>
                   </tr>
                 ))
               )}

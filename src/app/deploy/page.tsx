@@ -15,6 +15,7 @@ export default function Deploy() {
     const [nodes, setNodes] = useState(['pve']);
     const [storages, setStorages] = useState(['local-lvm', 'local']);
     const [isDeploying, setIsDeploying] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
 
     // Effect to load config and fetch available resources from API
     useEffect(() => {
@@ -60,10 +61,13 @@ export default function Deploy() {
         }
     };
 
-    const handleDeploy = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleDeployClick = async (e: React.MouseEvent) => {
+        e.preventDefault(); // In case it's inside a form tag, though button is type="button"
         if (!file) return alert('Please select a file');
+        setShowConfirm(true);
+    };
 
+    const confirmDeploy = async () => {
         // Get creds
         const credsStr = localStorage.getItem('proxmox_config');
         if (!credsStr) return alert('Please configure settings first!');
@@ -73,7 +77,7 @@ export default function Deploy() {
 
         try {
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', file!); // file is checked before opening modal
             formData.append('vmConfig', JSON.stringify({
                 ...config,
                 node: creds.node // Pass node from config
@@ -99,6 +103,7 @@ export default function Deploy() {
             }
 
             alert('Success: ' + (data.message || 'VM Deployed'));
+            setShowConfirm(false); // Close modal on success
 
         } catch (error: any) {
             alert('Error: ' + error.message);
@@ -114,12 +119,9 @@ export default function Deploy() {
                 <p className="text-secondary text-lg">Upload an image and provision a new instance.</p>
             </header>
 
-            <div className="grid lg:grid-cols-3 gap-8 animate-fade-in" style={{ animationDelay: '0.1s' }}>
+            <div className="max-w-4xl mx-auto animate-fade-in" style={{ animationDelay: '0.1s' }}>
+                <div className="space-y-8">
 
-                {/* Left Column: Configuration */}
-                <div className="lg:col-span-2 space-y-8">
-
-                    {/* File Upload Section */}
                     {/* File Upload Section */}
                     <div className="glass-panel p-8 group transition-all hover:bg-[rgba(15,23,42,0.6)]">
                         <h2 className="heading-lg flex items-center gap-3 mb-6">
@@ -163,7 +165,7 @@ export default function Deploy() {
                             <Zap className="text-warning" /> Instance Configuration
                         </h2>
 
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-2 gap-6 mb-8">
                             <div>
                                 <label>VM ID</label>
                                 <input
@@ -227,54 +229,68 @@ export default function Deploy() {
                                 </div>
                             </div>
                         </div>
+
+                        <button
+                            type="button"
+                            onClick={handleDeployClick}
+                            disabled={isDeploying || !file}
+                            className={`btn btn-primary w-full py-4 text-lg ${isDeploying ? 'opacity-70 cursor-wait' : ''}`}
+                        >
+                            {isDeploying ? 'Deploying...' : 'Deploy VM'}
+                        </button>
                     </div>
 
                 </div>
+            </div>
 
-                {/* Right Column: Summary & Action */}
-                <div className="space-y-6">
-                    <div className="glass-panel p-6 sticky top-6">
-                        <h3 className="text-lg font-bold mb-4">Deployment Summary</h3>
+            {/* Confirmation Modal */}
+            {showConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-[#0f172a] p-8 max-w-md w-full shadow-2xl border border-white/10 rounded-2xl relative">
+                        <h3 className="heading-lg mb-4">Confirm Deployment</h3>
+                        <p className="text-secondary mb-6">Are you sure you want to deploy this VM? Please review the details below.</p>
 
-                        <div className="space-y-4 mb-6">
-                            <div className="flex justify-between text-sm">
+                        <div className="bg-white/5 rounded-xl p-6 mb-8 border border-white/5">
+                            <div className="grid grid-cols-2 gap-y-3 text-sm">
                                 <span className="text-secondary">Target Node</span>
-                                <span className="font-mono">{nodes[0] || 'pve'}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
+                                <span className="font-mono font-bold text-right">{nodes[0] || 'pve'}</span>
+
                                 <span className="text-secondary">VM ID</span>
-                                <span className="font-mono">{config.vmid}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
+                                <span className="font-mono font-bold text-right">{config.vmid}</span>
+
                                 <span className="text-secondary">Name</span>
-                                <span>{config.name}</span>
+                                <span className="font-bold text-right truncate">{config.name}</span>
                             </div>
-                            <div className="flex justify-between text-sm border-t border-[rgba(255,255,255,0.1)] pt-4">
-                                <span className="text-secondary">Resources</span>
-                                <div className="text-right">
-                                    <div>{config.cores} Cores</div>
-                                    <div>{parseInt(config.memory) / 1024} GB RAM</div>
+
+                            <div className="border-t border-white/10 my-3"></div>
+
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-secondary">Specs</span>
+                                <div className="text-right font-mono text-xs font-bold">
+                                    {config.cores} Cores, {parseInt(config.memory) / 1024} GB RAM
                                 </div>
                             </div>
                         </div>
 
-                        <button
-                            onClick={handleDeploy}
-                            disabled={isDeploying || !file}
-                            className={`btn btn-primary w-full ${isDeploying ? 'opacity-70 cursor-wait' : ''}`}
-                        >
-                            {isDeploying ? 'Deploying...' : 'Deploy VM'}
-                        </button>
-
-                        {!file && (
-                            <p className="text-xs text-center mt-3 text-danger opacity-80">
-                                Please upload a VM image file.
-                            </p>
-                        )}
+                        <div className="flex gap-4">
+                            <button
+                                onClick={() => setShowConfirm(false)}
+                                className="btn btn-secondary flex-1"
+                                disabled={isDeploying}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDeploy}
+                                className="btn btn-primary flex-1"
+                                disabled={isDeploying}
+                            >
+                                {isDeploying ? 'Deploying...' : 'Confirm & Deploy'}
+                            </button>
+                        </div>
                     </div>
                 </div>
-
-            </div>
+            )}
         </div>
     );
 }
