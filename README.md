@@ -53,4 +53,45 @@ This application supports persistent server-side configuration for Proxmox crede
 }
 ```
 
-The `proxmox-config.json` file is git-ignored to prevent accidental commit of sensitive credentials. Default to using the in-app "Connect" screen if you prefer not to store credentials in a file.
+
+## Docker Deployment
+
+You can deploy this application using Docker.
+
+### 1. Build and Run Container
+
+```bash
+# Build the image
+docker build -t proxmox-ctrl .
+
+# Run the container
+# Mount your config file to /app/proxmox-config.json
+docker run -d \
+  -p 3000:3000 \
+  -v $(pwd)/proxmox-config.json:/app/proxmox-config.json \
+  --name proxmox-ctrl \
+  proxmox-ctrl
+```
+
+### 2. Docker Compose (Recommended)
+
+Create a `docker-compose.yml` file:
+
+```yaml
+version: '3'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./proxmox-config.json:/app/proxmox-config.json
+    restart: always
+```
+
+Then run:
+
+```bash
+docker-compose up -d
+```
+
