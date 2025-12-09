@@ -4,8 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import { CloudUpload, HardDrive, Cpu, Zap, Archive, Terminal, CheckCircle, XCircle, Loader2, ArrowDown, ArrowUp } from 'lucide-react';
 import axios from 'axios';
 import confetti from 'canvas-confetti';
+import { useAuth } from '@/components/AuthContext';
 
 export default function Deploy() {
+    const { host, token, node, sshHost, sshUsername, sshPassword, isAuthenticated } = useAuth();
+
     const [file, setFile] = useState<File | null>(null);
     const [config, setConfig] = useState({
         vmid: '103',
@@ -56,15 +59,13 @@ export default function Deploy() {
 
     // Effect to load config and fetch available resources from API
     useEffect(() => {
-        const credsStr = localStorage.getItem('proxmox_config');
-        if (!credsStr) return;
-        const creds = JSON.parse(credsStr);
+        if (!isAuthenticated || !host || !token || !node) return;
 
         const fetchResources = async () => {
             try {
                 // Storages
-                const storageRes = await fetch(`/api/proxmox/nodes/${creds.node}/storage`, {
-                    headers: { 'x-proxmox-host': creds.host, 'x-proxmox-token': creds.token }
+                const storageRes = await fetch(`/api/proxmox/nodes/${node}/storage`, {
+                    headers: { 'x-proxmox-host': host, 'x-proxmox-token': token }
                 });
                 if (storageRes.ok) {
                     const data = await storageRes.json();
@@ -73,8 +74,8 @@ export default function Deploy() {
                 }
 
                 // VMs for ID calculation
-                const vmRes = await fetch(`/api/proxmox/nodes/${creds.node}/qemu`, {
-                    headers: { 'x-proxmox-host': creds.host, 'x-proxmox-token': creds.token }
+                const vmRes = await fetch(`/api/proxmox/nodes/${node}/qemu`, {
+                    headers: { 'x-proxmox-host': host, 'x-proxmox-token': token }
                 });
                 if (vmRes.ok) {
                     const data = await vmRes.json();
@@ -90,7 +91,7 @@ export default function Deploy() {
         };
 
         fetchResources();
-    }, []);
+    }, [isAuthenticated, host, token, node]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -105,10 +106,7 @@ export default function Deploy() {
     };
 
     const handleUploadAndPrepare = async () => {
-        // Get creds
-        const credsStr = localStorage.getItem('proxmox_config');
-        if (!credsStr) return alert('Please configure settings first!');
-        const creds = JSON.parse(credsStr);
+        if (!isAuthenticated || !host || !token) return alert('Please configure settings first!');
 
         setShowConfirm(false);
         setStatus('uploading');
@@ -163,10 +161,7 @@ export default function Deploy() {
     };
 
     const startDeployment = async (fileId: string, disks: { name: string, size: number }[]) => {
-        // Get creds
-        const credsStr = localStorage.getItem('proxmox_config');
-        if (!credsStr) return alert('Configuration lost, please reload');
-        const creds = JSON.parse(credsStr);
+        if (!isAuthenticated) return alert('Configuration lost, please reload');
 
         setStatus('deploying');
 
@@ -175,19 +170,19 @@ export default function Deploy() {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-proxmox-host': creds.host,
-                    'x-proxmox-token': creds.token,
-                    'x-proxmox-node': creds.node,
-                    'x-proxmox-ssh-host': creds.sshHost || '',
-                    'x-proxmox-ssh-username': creds.sshUsername || '',
-                    'x-proxmox-ssh-password': creds.sshPassword || ''
+                    'x-proxmox-host': host,
+                    'x-proxmox-token': token,
+                    'x-proxmox-node': node,
+                    'x-proxmox-ssh-host': sshHost || '',
+                    'x-proxmox-ssh-username': sshUsername || '',
+                    'x-proxmox-ssh-password': sshPassword || ''
                 },
                 body: JSON.stringify({
                     fileId,
                     diskOrder: disks.map(d => d.name), // Pass just the names
                     vmConfig: {
                         ...config,
-                        node: creds.node
+                        node: node
                     }
                 }),
             });
