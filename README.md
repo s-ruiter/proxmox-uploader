@@ -63,7 +63,7 @@ You need to create a configuration file to store your Proxmox credentials.
 2. Start the container:
 
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 The application will be available at [http://localhost:3000](http://localhost:3000).
