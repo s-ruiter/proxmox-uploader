@@ -1,0 +1,8 @@
+{
+  "host": "https://192.168.1.100:8006",
+  "node": "pve",
+  "token": "root@pam!tokenid=12345678-1234-1234-1234-1234567890ab",
+  "sshHost": "192.168.1.100",
+  "sshUsername": "root",
+  "sshPassword": "your-ssh-password-here"
+}

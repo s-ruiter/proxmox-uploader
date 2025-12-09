@@ -34,3 +34,23 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Configuration
+
+This application supports persistent server-side configuration for Proxmox credentials.
+
+1.  Copy `proxmox-config.json.sample` to `proxmox-config.json`.
+2.  Edit `proxmox-config.json` with your Proxmox API and SSH details.
+
+```json
+{
+  "host": "https://<your-proxmox-ip>:8006",
+  "node": "pve",
+  "token": "root@pam!tokenid=...",
+  "sshHost": "<your-proxmox-ip>",
+  "sshUsername": "root",
+  "sshPassword": "<your-password>"
+}
+```
+
+The `proxmox-config.json` file is git-ignored to prevent accidental commit of sensitive credentials. Default to using the in-app "Connect" screen if you prefer not to store credentials in a file.
