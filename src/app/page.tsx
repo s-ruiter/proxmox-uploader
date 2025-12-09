@@ -60,8 +60,8 @@ export default function Home() {
 
   return (
     <div className="page-container">
-      <header className="mb-8">
-        <h1 className="heading-xl animate-fade-in">Cluster Overview</h1>
+      <header className="mb-8 text-center">
+        <h1 className="heading-xl animate-fade-in">Host Overview</h1>
       </header>
 
       <div className="glass-panel p-6 animate-fade-in" style={{ animationDelay: '0.2s' }}>

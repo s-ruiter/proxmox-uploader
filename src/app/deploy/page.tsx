@@ -242,9 +242,9 @@ export default function Deploy() {
 
     return (
         <div className="page-container relative">
-            <header className="mb-8">
+            <header className="mb-8 text-center">
                 <h1 className="heading-xl animate-fade-in">Deploy Virtual Machine</h1>
-                <p className="text-secondary text-lg">Upload an image and provision a new instance.</p>
+                <p className="text-white text-lg">Upload an image and provision a new instance.</p>
             </header>
 
             <div className={`max-w-4xl mx-auto transition-all duration-500 ${status !== 'idle' ? 'opacity-50 pointer-events-none blur-sm' : 'opacity-100'}`}>

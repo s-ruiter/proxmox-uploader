@@ -6,7 +6,7 @@ import { LayoutDashboard, CloudUpload, Settings, Globe } from 'lucide-react';
 import Logo from './Logo';
 
 const navItems = [
-    { name: 'Cluster', href: '/', icon: LayoutDashboard },
+    { name: 'Host', href: '/', icon: LayoutDashboard },
     { name: 'Deploy', href: '/deploy', icon: CloudUpload },
     { name: 'Settings', href: '/settings', icon: Settings },
 ];
@@ -84,6 +84,10 @@ export default function Navbar() {
                     </div>
                 </div>
             </div>
-        </nav>
+
+            <div style={{ marginTop: '1rem', padding: '0 1rem', fontSize: '0.7rem', color: 'var(--secondary)', opacity: 0.6 }}>
+                version 1.0 by <a href="https://github.com/sruiter/proxmox-ctrl" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>sruiter</a>
+            </div>
+        </nav >
     );
 }
