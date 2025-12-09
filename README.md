@@ -100,3 +100,18 @@ docker run -d \
   --name proxmox-uploader \
   proxmox-uploader
 ```
+
+### Updating the Application
+
+To update the application with the latest changes from the repository:
+
+1. Pull the latest code:
+   ```bash
+   git pull origin main
+   ```
+
+2. Rebuild and restart the container:
+   ```bash
+   docker compose up -d --build
+   ```
+   > The `--build` flag ensures the image is rebuilt with the new code. The `-d` flag runs it in detached mode.
