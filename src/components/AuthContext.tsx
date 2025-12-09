@@ -96,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const login = async (config: Omit<AuthState, 'isAuthenticated'>, saveToServer?: boolean) => {
         const success = await testConnection(config);
         if (success) {
-            localStorage.setItem('proxmox_config', JSON.stringify(config));
+            // localStorage.setItem('proxmox_config', JSON.stringify(config)); // REMOVED per user request
 
             if (saveToServer) {
                 try {

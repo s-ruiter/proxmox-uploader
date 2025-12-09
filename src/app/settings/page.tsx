@@ -16,7 +16,6 @@ export default function Settings() {
         sshUsername: sshUsername || '',
         sshPassword: sshPassword || ''
     });
-    const [saveToFile, setSaveToFile] = useState(false);
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
     const [isChecking, setIsChecking] = useState(false);
@@ -24,50 +23,7 @@ export default function Settings() {
     // Keep local state in sync if context changes (optional, mostly for initial load)
     // But usually settings is where you EDIT it.
 
-    const handleTest = async () => {
-        setError('');
-        setSuccessMsg('');
-        setIsChecking(true);
-
-        if (!formData.host.startsWith('http')) {
-            setError('Host must start with http:// or https://');
-            setIsChecking(false);
-            return;
-        }
-
-        try {
-            // We fetch 'nodes' instead of just 'version' so we can auto-detect the node name
-            const res = await fetch('/api/proxmox/nodes', {
-                headers: {
-                    'x-proxmox-host': formData.host,
-                    'x-proxmox-token': formData.token
-                }
-            });
-
-            if (!res.ok) throw new Error('Connection failed. Check host and token.');
-
-            const data = await res.json();
-            const nodes = data.data;
-
-            if (Array.isArray(nodes) && nodes.length > 0) {
-                const firstNode = nodes[0].node;
-
-                // Auto-fill node if empty or different (we prioritize the detected one)
-                setFormData(prev => ({ ...prev, node: firstNode }));
-                setSuccessMsg(`Connection successful! Connected to node: ${firstNode}`);
-            } else {
-                setSuccessMsg("Connection successful! (No nodes found?)");
-            }
-
-        } catch (err: any) {
-            console.error(err);
-            setError(err.message || "Connection failed");
-        } finally {
-            setIsChecking(false);
-        }
-    };
-
-    const handleSave = async (e: React.FormEvent) => {
+    const handleTestAndSave = async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
         setError('');
         setSuccessMsg('');
@@ -79,39 +35,80 @@ export default function Settings() {
             return;
         }
 
-        // We rely on the context's login, but we should probably ensure we have a node
-        // If the user skipped Test, they might not have a node. 
-        // Let's try to auto-detect on save too if node is missing.
-        let nodeToSave = formData.node;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
-        if (!nodeToSave) {
-            try {
-                const res = await fetch('/api/proxmox/nodes', {
-                    headers: {
-                        'x-proxmox-host': formData.host,
-                        'x-proxmox-token': formData.token
-                    }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.data?.[0]?.node) {
-                        nodeToSave = data.data[0].node;
-                        setFormData(prev => ({ ...prev, node: nodeToSave }));
-                    }
+        try {
+            // 1. Test API Connection & Auto-detect Node
+            const res = await fetch('/api/proxmox/nodes', {
+                headers: {
+                    'x-proxmox-host': formData.host,
+                    'x-proxmox-token': formData.token
+                },
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!res.ok) throw new Error('API Connection failed. Check Host URL and Token.');
+
+            const data = await res.json();
+            const nodes = data.data;
+            let nodeToUse = formData.node;
+
+            if (Array.isArray(nodes) && nodes.length > 0) {
+                if (!nodeToUse || !nodes.find((n: any) => n.node === nodeToUse)) {
+                    nodeToUse = nodes[0].node;
+                    setFormData(prev => ({ ...prev, node: nodeToUse }));
                 }
-            } catch (e) {
-                // Ignore, just try login with what we have
             }
-        }
 
-        const success = await login({ ...formData, node: nodeToSave }, saveToFile);
+            // 2. Test SSH Connection (if provided)
+            let derivedSshHost = '';
+            try {
+                const url = new URL(formData.host);
+                derivedSshHost = url.hostname;
+            } catch (e) {
+                // Should be caught by earlier validation, but just in case
+            }
 
-        if (success) {
-            setSuccessMsg('Settings saved and connected!');
-        } else {
-            setError('Connection failed. Settings NOT saved.');
+            if (derivedSshHost && formData.sshUsername && formData.sshPassword) {
+                const sshRes = await fetch('/api/test-ssh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        host: derivedSshHost,
+                        username: formData.sshUsername,
+                        password: formData.sshPassword
+                    })
+                });
+
+                if (!sshRes.ok) {
+                    const sshData = await sshRes.json();
+                    throw new Error(`SSH Connection failed: ${sshData.error || 'Unknown error'}`);
+                }
+            }
+
+            // 3. Save and Login (Only passes if tests succeeded)
+            // We save the derived SSH host to the config so the backend knows what to connect to
+            const success = await login({ ...formData, sshHost: derivedSshHost, node: nodeToUse }, true);
+
+            if (success) {
+                setSuccessMsg(`Connection successful! Configuration saved to server.`);
+            } else {
+                throw new Error('Verification failed during save.');
+            }
+
+        } catch (err: any) {
+            console.error(err);
+            if (err.name === 'AbortError') {
+                setError('Connection timed out. Check Host URL.');
+            } else {
+                setError(err.message || "Connection failed");
+            }
+        } finally {
+            clearTimeout(timeoutId);
+            setIsChecking(false);
         }
-        setIsChecking(false);
     };
 
     return (
@@ -121,7 +118,7 @@ export default function Settings() {
                 <p className="text-secondary text-lg">Configure your Proxmox connection details.</p>
             </header>
 
-            <form onSubmit={handleSave} className="animate-fade-in space-y-8" style={{ animationDelay: '0.1s' }}>
+            <form className="animate-fade-in space-y-8" style={{ animationDelay: '0.1s' }}>
 
                 {/* Connection Details Panel */}
                 <div className="glass-panel p-8">
@@ -186,16 +183,7 @@ export default function Settings() {
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-8">
-                        <div>
-                            <label className="text-xs uppercase font-bold text-secondary tracking-wider mb-2 block">SSH Host</label>
-                            <input
-                                type="text"
-                                className="input py-3 bg-opacity-50"
-                                placeholder="192.168.1.100"
-                                value={formData.sshHost || ''}
-                                onChange={(e) => setFormData({ ...formData, sshHost: e.target.value })}
-                            />
-                        </div>
+
                         <div>
                             <label className="text-xs uppercase font-bold text-secondary tracking-wider mb-2 block">SSH Username</label>
                             <input
@@ -219,23 +207,6 @@ export default function Settings() {
                     </div>
                 </div>
 
-                {/* Save to File Option */}
-                <div className="glass-panel p-6 flex items-center gap-4">
-                    <input
-                        type="checkbox"
-                        id="saveToFile"
-                        checked={saveToFile}
-                        onChange={(e) => setSaveToFile(e.target.checked)}
-                        className="w-5 h-5 rounded border-white/20 bg-black/20 text-primary focus:ring-primary cursor-pointer"
-                    />
-                    <label htmlFor="saveToFile" className="text-base text-secondary cursor-pointer m-0 normal-case flex-1">
-                        <strong>Save configuration to server file?</strong>
-                        <span className="block text-xs mt-1 opacity-70">
-                            If checked, credentials will be saved to 'proxmox-config.json' on the server for auto-login.
-                        </span>
-                    </label>
-                </div>
-
                 {/* Status Messages */}
                 {error && (
                     <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-danger flex items-center justify-center font-medium animate-fade-in">
@@ -253,18 +224,11 @@ export default function Settings() {
                 <div className="flex gap-4 pt-4">
                     <button
                         type="button"
-                        onClick={handleTest}
-                        className="btn btn-secondary flex-1 py-4 text-base"
-                        disabled={isChecking}
-                    >
-                        {isChecking ? 'Testing Connection...' : 'Test Connection'}
-                    </button>
-                    <button
-                        type="submit"
+                        onClick={handleTestAndSave}
                         className="btn btn-primary flex-1 py-4 text-base shadow-lg hover:shadow-primary/40"
                         disabled={isChecking}
                     >
-                        {isChecking ? 'Saving...' : 'Save Configuration'}
+                        {isChecking ? 'Saving...' : 'Test connection and Save'}
                     </button>
                 </div>
 
