@@ -63,8 +63,8 @@ git clone <your-repo-url> proxmox-ctrl
 # Enter the directory
 cd proxmox-ctrl
 
-# Prepare your configuration (see Configuration section above)
-cp proxmox-config.json.sample proxmox-config.json
+# Prepare your configuration
+# Create the config file and paste your credentials from the example above
 nano proxmox-config.json
 ```
 
