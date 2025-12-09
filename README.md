@@ -29,11 +29,6 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
 ## Configuration
 
@@ -53,12 +48,27 @@ This application supports persistent server-side configuration for Proxmox crede
 }
 ```
 
-
 ## Docker Deployment
 
 You can deploy this application using Docker.
 
-### 1. Build and Run Container
+### 1. Prerequisites
+
+First, ensure you have Docker installed. Then clone the repository and navigate to the project folder:
+
+```bash
+# Clone the repository
+git clone <your-repo-url> proxmox-ctrl
+
+# Enter the directory
+cd proxmox-ctrl
+
+# Prepare your configuration (see Configuration section above)
+cp proxmox-config.json.sample proxmox-config.json
+nano proxmox-config.json
+```
+
+### 2. Build and Run Container
 
 ```bash
 # Build the image
