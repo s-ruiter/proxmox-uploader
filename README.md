@@ -17,7 +17,7 @@ The recommended way to run this application is using Docker.
 Clone the repository and enter the project directory:
 
 ```bash
-git clone https://github.com/sruiter/proxmox-uploader.git
+git clone https://github.com/s-ruiter/proxmox-uploader.git
 cd proxmox-uploader
 ```
 

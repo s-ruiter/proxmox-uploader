@@ -86,7 +86,7 @@ export default function Navbar() {
             </div>
 
             <div style={{ marginTop: '1rem', padding: '0 1rem', fontSize: '0.7rem', color: 'var(--secondary)', opacity: 0.6 }}>
-                version 1.0 by <a href="https://github.com/sruiter/proxmox-uploader" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>sruiter</a>
+                version 1.0 by <a href="https://github.com/s-ruiter/proxmox-uploader" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>sruiter</a>
             </div>
         </nav >
     );
