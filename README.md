@@ -49,7 +49,6 @@ You need to create a configuration file to store your Proxmox credentials.
 1. Create a `docker-compose.yml` file (if it doesn't exist already):
 
    ```yaml
-   version: '3'
    services:
      app:
        build: .
