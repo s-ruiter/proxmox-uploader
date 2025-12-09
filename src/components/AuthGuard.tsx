@@ -10,21 +10,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
 
     useEffect(() => {
-        if (!isLoading && !isAuthenticated && pathname !== '/login') {
-            router.push('/login');
+        if (!isLoading && !isAuthenticated && pathname !== '/connect') {
+            router.push('/connect');
         }
     }, [isLoading, isAuthenticated, pathname, router]);
-
-    if (pathname === '/login') {
-        // If on login page, render children (which is the Login page content, but wait...)
-        // Actually, RootLayout wraps everything including Navbar.
-        // We don't want Navbar on login page usually.
-        return (
-            <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100, background: 'var(--background)' }}>
-                {children}
-            </div>
-        );
-    }
 
     if (isLoading) {
         return (
@@ -34,7 +23,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         );
     }
 
-    if (!isAuthenticated) return null;
+    if (!isAuthenticated && pathname !== '/connect') return null;
 
     return <>{children}</>;
 }

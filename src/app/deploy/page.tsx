@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { CloudUpload, HardDrive, Cpu, Zap, Archive } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { CloudUpload, HardDrive, Cpu, Zap, Archive, Terminal, CheckCircle, XCircle, Loader2, ArrowDown, ArrowUp } from 'lucide-react';
+import axios from 'axios';
+import confetti from 'canvas-confetti';
 
 export default function Deploy() {
     const [file, setFile] = useState<File | null>(null);
@@ -14,8 +16,43 @@ export default function Deploy() {
     });
     const [nodes, setNodes] = useState(['pve']);
     const [storages, setStorages] = useState(['local-lvm', 'local']);
-    const [isDeploying, setIsDeploying] = useState(false);
+
+    // Status State
+    const [status, setStatus] = useState<'idle' | 'uploading' | 'configuring_disks' | 'deploying' | 'success' | 'error'>('idle');
+    const [uploadProgress, setUploadProgress] = useState(0);
+    const [deployLogs, setDeployLogs] = useState<string[]>([]);
+    const [errorMessage, setErrorMessage] = useState('');
     const [showConfirm, setShowConfirm] = useState(false);
+
+    // Disk Mapping
+    const [uploadedFileId, setUploadedFileId] = useState<string | null>(null);
+    const [detectedDisks, setDetectedDisks] = useState<{ name: string, size: number }[]>([]);
+
+    const logsEndRef = useRef<HTMLDivElement>(null);
+
+    // Helper for bytes
+    const formatBytes = (bytes: number, decimals = 2) => {
+        if (!+bytes) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+    }
+
+    // Scroll logs to bottom and triggering confetti
+    useEffect(() => {
+        if (logsEndRef.current) {
+            logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+        if (status === 'success') {
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 }
+            });
+        }
+    }, [deployLogs, status]);
 
     // Effect to load config and fetch available resources from API
     useEffect(() => {
@@ -62,30 +99,82 @@ export default function Deploy() {
     };
 
     const handleDeployClick = async (e: React.MouseEvent) => {
-        e.preventDefault(); // In case it's inside a form tag, though button is type="button"
+        e.preventDefault();
         if (!file) return alert('Please select a file');
         setShowConfirm(true);
     };
 
-    const confirmDeploy = async () => {
+    const handleUploadAndPrepare = async () => {
         // Get creds
         const credsStr = localStorage.getItem('proxmox_config');
         if (!credsStr) return alert('Please configure settings first!');
         const creds = JSON.parse(credsStr);
 
-        setIsDeploying(true);
+        setShowConfirm(false);
+        setStatus('uploading');
+        setUploadProgress(0);
+        setDeployLogs([]);
+        setErrorMessage('');
+        setUploadedFileId(null);
+        setDetectedDisks([]);
 
         try {
+            // 1. Upload File
             const formData = new FormData();
-            formData.append('file', file!); // file is checked before opening modal
-            formData.append('vmConfig', JSON.stringify({
-                ...config,
-                node: creds.node // Pass node from config
-            }));
+            formData.append('file', file!);
 
-            const res = await fetch('/api/deploy', {
+            const uploadRes = await axios.post('/api/upload', formData, {
+                onUploadProgress: (progressEvent) => {
+                    const total = progressEvent.total || 1;
+                    const percent = Math.round((progressEvent.loaded * 100) / total);
+                    setUploadProgress(percent);
+                }
+            });
+
+            if (!uploadRes.data.success) throw new Error(uploadRes.data.error || 'Upload failed');
+
+            setUploadedFileId(uploadRes.data.fileId);
+            const disks = uploadRes.data.detectedFiles || [];
+
+            if (disks.length > 1) {
+                // If multiple disks found, pause for configuration
+                setDetectedDisks(disks);
+                setStatus('configuring_disks');
+            } else {
+                // If single disk, proceed directly
+                startDeployment(uploadRes.data.fileId, disks);
+            }
+
+        } catch (error: any) {
+            console.error(error);
+            setErrorMessage(error.message || 'Upload failed');
+            setStatus('error');
+        }
+    };
+
+    const moveDisk = (index: number, direction: 'up' | 'down') => {
+        const newDisks = [...detectedDisks];
+        if (direction === 'up' && index > 0) {
+            [newDisks[index], newDisks[index - 1]] = [newDisks[index - 1], newDisks[index]];
+        } else if (direction === 'down' && index < newDisks.length - 1) {
+            [newDisks[index], newDisks[index + 1]] = [newDisks[index + 1], newDisks[index]];
+        }
+        setDetectedDisks(newDisks);
+    };
+
+    const startDeployment = async (fileId: string, disks: { name: string, size: number }[]) => {
+        // Get creds
+        const credsStr = localStorage.getItem('proxmox_config');
+        if (!credsStr) return alert('Configuration lost, please reload');
+        const creds = JSON.parse(credsStr);
+
+        setStatus('deploying');
+
+        try {
+            const response = await fetch('/api/deploy', {
                 method: 'POST',
                 headers: {
+                    'Content-Type': 'application/json',
                     'x-proxmox-host': creds.host,
                     'x-proxmox-token': creds.token,
                     'x-proxmox-node': creds.node,
@@ -93,33 +182,73 @@ export default function Deploy() {
                     'x-proxmox-ssh-username': creds.sshUsername || '',
                     'x-proxmox-ssh-password': creds.sshPassword || ''
                 },
-                body: formData,
+                body: JSON.stringify({
+                    fileId,
+                    diskOrder: disks.map(d => d.name), // Pass just the names
+                    vmConfig: {
+                        ...config,
+                        node: creds.node
+                    }
+                }),
             });
 
-            const data = await res.json();
+            if (!response.body) throw new Error("No response body from deployment stream");
 
-            if (!res.ok) {
-                throw new Error(data.error || 'Deployment failed');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            if (data.type === 'log') {
+                                setDeployLogs(prev => [...prev, data.message]);
+                            } else if (data.type === 'error') {
+                                throw new Error(data.message);
+                            } else if (data.type === 'done') {
+                                setStatus('success');
+                            }
+                        } catch (e: any) {
+                            if (line.includes('"type":"error"')) {
+                                setErrorMessage('Stream Error');
+                                setStatus('error');
+                            }
+                        }
+                    }
+                }
             }
-
-            alert('Success: ' + (data.message || 'VM Deployed'));
-            setShowConfirm(false); // Close modal on success
-
         } catch (error: any) {
-            alert('Error: ' + error.message);
-        } finally {
-            setIsDeploying(false);
+            console.error(error);
+            setErrorMessage(error.message || 'Deployment error');
+            setStatus('error');
         }
     };
 
+    const resetState = () => {
+        setStatus('idle');
+        setUploadProgress(0);
+        setDeployLogs([]);
+        setErrorMessage('');
+        setUploadedFileId(null);
+        setDetectedDisks([]);
+    }
+
     return (
-        <div className="page-container">
+        <div className="page-container relative">
             <header className="mb-8">
                 <h1 className="heading-xl animate-fade-in">Deploy Virtual Machine</h1>
                 <p className="text-secondary text-lg">Upload an image and provision a new instance.</p>
             </header>
 
-            <div className="max-w-4xl mx-auto animate-fade-in" style={{ animationDelay: '0.1s' }}>
+            <div className={`max-w-4xl mx-auto transition-all duration-500 ${status !== 'idle' ? 'opacity-50 pointer-events-none blur-sm' : 'opacity-100'}`}>
+                {/* Main Content (File Upload + Config) - Same as before */}
                 <div className="space-y-8">
 
                     {/* File Upload Section */}
@@ -233,15 +362,120 @@ export default function Deploy() {
                         <button
                             type="button"
                             onClick={handleDeployClick}
-                            disabled={isDeploying || !file}
-                            className={`btn btn-primary w-full py-4 text-lg ${isDeploying ? 'opacity-70 cursor-wait' : ''}`}
+                            disabled={!file}
+                            className={`btn btn-primary w-full py-4 text-lg`}
                         >
-                            {isDeploying ? 'Deploying...' : 'Deploy VM'}
+                            Deploy VM
                         </button>
                     </div>
 
                 </div>
             </div>
+
+            {/* Progress Overly for Uploading/Deploying */}
+            {status !== 'idle' && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+                    <div className="bg-[#0f172a] p-8 max-w-2xl w-full shadow-2xl border border-white/10 rounded-2xl flex flex-col gap-6 max-h-[80vh]">
+
+                        {/* Header based on status */}
+                        <div className="flex items-center justify-between">
+                            <h3 className="heading-lg flex items-center gap-3">
+                                {status === 'uploading' && <><CloudUpload className="animate-bounce text-primary" /> Uploading Image...</>}
+                                {status === 'configuring_disks' && <><HardDrive className="text-info" /> Disk Configuration</>}
+                                {status === 'deploying' && <><Loader2 className="animate-spin text-warning" /> Deploying VM...</>}
+                                {status === 'success' && <><CheckCircle className="text-success" /> Deployment Successful</>}
+                                {status === 'error' && <><XCircle className="text-error" /> Deployment Failed</>}
+                            </h3>
+                            {status === 'success' || status === 'error' ? (
+                                <button onClick={resetState} className="btn btn-secondary text-sm">Close</button>
+                            ) : null}
+                        </div>
+
+                        {/* Upload Progress Bar */}
+                        {status === 'uploading' && (
+                            <div className="space-y-2">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-secondary">Uploading to server...</span>
+                                    <span className="font-mono font-bold">{uploadProgress}%</span>
+                                </div>
+                                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-primary transition-all duration-300 ease-out"
+                                        style={{ width: `${uploadProgress}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Disk Configuration (Reorder) */}
+                        {status === 'configuring_disks' && (
+                            <div className="space-y-4">
+                                <p className="text-secondary text-sm">We detected multiple disk images. Please arrange them in the desired order (Top = scsi0/Boot).</p>
+                                <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar p-1">
+                                    {detectedDisks.map((disk, idx) => (
+                                        <div key={disk.name} className="flex items-center justify-between bg-white/5 p-3 rounded-lg border border-white/5">
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <div className="px-2 py-1 bg-primary/20 text-primary text-xs font-mono rounded shrink-0">
+                                                    scsi{idx}
+                                                </div>
+                                                <div className="flex flex-col overflow-hidden">
+                                                    <span className="font-mono text-sm truncate" title={disk.name}>{disk.name}</span>
+                                                    <span className="text-xs text-secondary">{formatBytes(disk.size)}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-1 shrink-0">
+                                                <button
+                                                    onClick={() => moveDisk(idx, 'up')}
+                                                    disabled={idx === 0}
+                                                    className="p-1 hover:bg-white/10 rounded disabled:opacity-30"
+                                                >
+                                                    <ArrowUp size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => moveDisk(idx, 'down')}
+                                                    disabled={idx === detectedDisks.length - 1}
+                                                    className="p-1 hover:bg-white/10 rounded disabled:opacity-30"
+                                                >
+                                                    <ArrowDown size={16} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button
+                                    onClick={() => startDeployment(uploadedFileId!, detectedDisks)}
+                                    className="btn btn-primary w-full mt-4"
+                                >
+                                    Confirm Order & Deploy
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Logs Terminal */}
+                        {(status === 'deploying' || status === 'success' || status === 'error') && (
+                            <div className="flex-1 min-h-[300px] bg-black/50 rounded-xl border border-white/10 p-4 font-mono text-sm overflow-hidden flex flex-col">
+                                <div className="flex items-center gap-2 text-secondary mb-3 border-b border-white/5 pb-2">
+                                    <Terminal size={14} />
+                                    <span>Deployment Log</span>
+                                </div>
+                                <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar pr-2">
+                                    {deployLogs.map((log, i) => (
+                                        <div key={i} className="text-slate-300 break-words animate-fade-in">
+                                            <span className="text-white/20 mr-2">$</span>
+                                            {log}
+                                        </div>
+                                    ))}
+                                    {status === 'error' && (
+                                        <div className="text-error font-bold mt-2">Error: {errorMessage}</div>
+                                    )}
+                                    <div ref={logsEndRef} />
+                                </div>
+                            </div>
+                        )}
+
+                    </div>
+                </div>
+            )}
 
             {/* Confirmation Modal */}
             {showConfirm && (
@@ -252,23 +486,11 @@ export default function Deploy() {
 
                         <div className="bg-white/5 rounded-xl p-6 mb-8 border border-white/5">
                             <div className="grid grid-cols-2 gap-y-3 text-sm">
-                                <span className="text-secondary">Target Node</span>
-                                <span className="font-mono font-bold text-right">{nodes[0] || 'pve'}</span>
-
                                 <span className="text-secondary">VM ID</span>
-                                <span className="font-mono font-bold text-right">{config.vmid}</span>
+                                <span className="font-mono font-bold text-left">{config.vmid}</span>
 
                                 <span className="text-secondary">Name</span>
-                                <span className="font-bold text-right truncate">{config.name}</span>
-                            </div>
-
-                            <div className="border-t border-white/10 my-3"></div>
-
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-secondary">Specs</span>
-                                <div className="text-right font-mono text-xs font-bold">
-                                    {config.cores} Cores, {parseInt(config.memory) / 1024} GB RAM
-                                </div>
+                                <span className="font-bold text-left truncate">{config.name}</span>
                             </div>
                         </div>
 
@@ -276,16 +498,14 @@ export default function Deploy() {
                             <button
                                 onClick={() => setShowConfirm(false)}
                                 className="btn btn-secondary flex-1"
-                                disabled={isDeploying}
                             >
                                 Cancel
                             </button>
                             <button
-                                onClick={confirmDeploy}
+                                onClick={handleUploadAndPrepare}
                                 className="btn btn-primary flex-1"
-                                disabled={isDeploying}
                             >
-                                {isDeploying ? 'Deploying...' : 'Confirm & Deploy'}
+                                Upload & Configure
                             </button>
                         </div>
                     </div>

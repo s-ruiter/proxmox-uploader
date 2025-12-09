@@ -33,7 +33,8 @@ async function uploadAndImportViaSSH(
     fileName: string,
     vmid: string,
     storage: string,
-    node: string
+    node: string,
+    diskIndex: number
 ) {
     const ssh = new NodeSSH();
     let tempLocalPath: string | undefined;
@@ -56,27 +57,32 @@ async function uploadAndImportViaSSH(
 
         await ssh.putFile(tempLocalPath, remotePath);
 
-        console.log('SFTP Upload done. Running importdisk...');
+        console.log('SFTP Upload done. Running qm set import-from...');
 
-        const cmd = `qm importdisk ${vmid} ${remotePath} ${storage}`;
-        const result = await ssh.execCommand(cmd);
-
-        if (result.code !== 0) {
-            throw new Error(`qm importdisk failed: ${result.stderr}`);
+        // Direct Attach (Atomic Import + Attach)
+        // scsi${diskIndex} to avoid overwriting disks or boot order conflicts
+        const attachCmd = `qm set ${vmid} --scsi${diskIndex} ${storage}:0,import-from=${remotePath}`;
+        if (diskIndex === 0) {
+            // Set boot order only for the first disk
+            // Note: 'qm set' accepts multiple params
+            // attachCmd += ` --boot order=scsi0`; // Actually stick to separate command or just this if supported
         }
 
-        console.log('Import Disk Successful. Attaching...');
+        const result = await ssh.execCommand(attachCmd);
 
-        const attachCmd = `qm set ${vmid} --scsi0 ${storage}:0,import-from=${remotePath} --boot order=scsi0`;
-
-        const attachRes = await ssh.execCommand(attachCmd);
-
-        // Always cleanup remote temp
+        // Cleanup remote file immediately
         await ssh.execCommand(`rm ${remotePath}`);
 
-        if (attachRes.code !== 0) {
-            throw new Error(`qm set failed: ${attachRes.stderr}`);
+        if (result.code !== 0) {
+            throw new Error(`qm set (import-from) failed: ${result.stderr}`);
         }
+
+        // Set boot order if it's the first disk
+        if (diskIndex === 0) {
+            await ssh.execCommand(`qm set ${vmid} --boot order=scsi0`);
+        }
+
+        console.log(`Disk scsi${diskIndex} attached successfully.`);
 
     } catch (e) {
         throw e;
@@ -91,130 +97,204 @@ async function uploadAndImportViaSSH(
 }
 
 export async function POST(req: NextRequest) {
-    try {
-        const formData = await req.formData();
-        const file = formData.get('file') as File;
-        const vmConfigRaw = formData.get('vmConfig');
+    const encoder = new TextEncoder();
+    const stream = new TransformStream();
+    const writer = stream.writable.getWriter();
 
-        // Authentication headers
-        const host = req.headers.get('x-proxmox-host');
-        const token = req.headers.get('x-proxmox-token');
-        const node = req.headers.get('x-proxmox-node') || 'pve';
+    const writeLog = async (msg: string) => {
+        console.log(msg); // Keep server logs too
+        await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: msg })}\n\n`));
+    };
 
-        // SSH Auth headers
-        const sshHost = req.headers.get('x-proxmox-ssh-host');
-        const sshUser = req.headers.get('x-proxmox-ssh-username');
-        const sshPass = req.headers.get('x-proxmox-ssh-password');
+    (async () => {
+        // Cleaning up temp file at the end
+        let tempFilePath: string | null = null;
 
-        if (!host || !token || !vmConfigRaw || !file) {
-            return NextResponse.json({ error: 'Missing configuration, auth, or file' }, { status: 401 });
-        }
+        try {
+            const body = await req.json();
+            const { fileId, vmConfig } = body;
 
-        const vmConfig = JSON.parse(vmConfigRaw as string);
-        console.log(`Starting deployment for VM ${vmConfig.vmid} (${vmConfig.name})`);
+            // Authentication headers
+            const host = req.headers.get('x-proxmox-host');
+            const token = req.headers.get('x-proxmox-token');
+            const node = req.headers.get('x-proxmox-node') || 'pve';
 
-        // 1. Prepare Disk Images
-        const filesToUpload: { name: string, buffer: Buffer }[] = [];
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
+            // SSH Auth headers
+            const sshHost = req.headers.get('x-proxmox-ssh-host');
+            const sshUser = req.headers.get('x-proxmox-ssh-username');
+            const sshPass = req.headers.get('x-proxmox-ssh-password');
 
-        if (file.name.endsWith('.zip')) {
-            console.log("Processing ZIP file...");
-            const zip = new AdmZip(buffer);
-            const zipEntries = zip.getEntries();
-            zipEntries.forEach((entry) => {
-                if (!entry.isDirectory && (entry.entryName.endsWith('.qcow2') || entry.entryName.endsWith('.img') || entry.entryName.endsWith('.iso'))) {
-                    filesToUpload.push({
-                        name: entry.entryName,
-                        buffer: entry.getData()
+            if (!host || !token || !vmConfig || !fileId) {
+                await writeLog('Error: Missing configuration, auth, or fileId');
+                throw new Error('Missing configuration, auth, or fileId');
+            }
+
+            const fileName = fileId as string; // This is the ID/Filename from /api/upload
+            tempFilePath = path.join(os.tmpdir(), fileName);
+
+            if (!fs.existsSync(tempFilePath)) {
+                throw new Error('File not found. Please upload again.');
+            }
+
+            await writeLog(`Starting deployment for VM ${vmConfig.vmid} (${vmConfig.name})`);
+            await writeLog(`Reading file from ${tempFilePath}...`);
+
+            // 1. Prepare Disk Images
+            // Now using 'diskOrder' if provided to map names to sequence
+            const diskOrder = body.diskOrder as string[]; // optional
+
+            const filesToUpload: { name: string, buffer: Buffer }[] = [];
+            const fileBuffer = fs.readFileSync(tempFilePath);
+
+            // Checking if zip based on original logic logic
+            if (fileName.endsWith('.zip')) {
+                await writeLog("Processing ZIP file...");
+                const zip = new AdmZip(fileBuffer);
+                const zipEntries = zip.getEntries();
+
+                // Get all valid entries first
+                const validEntries = zipEntries.filter(entry =>
+                    !entry.isDirectory && (entry.entryName.endsWith('.qcow2') || entry.entryName.endsWith('.img') || entry.entryName.endsWith('.iso'))
+                );
+
+                if (diskOrder && diskOrder.length > 0) {
+                    await writeLog("Using custom disk order...");
+                    // Sort based on diskOrder
+                    diskOrder.forEach(imgName => {
+                        const entry = validEntries.find(e => e.entryName === imgName);
+                        if (entry) {
+                            filesToUpload.push({ name: entry.entryName, buffer: entry.getData() });
+                        }
+                    });
+
+                    // Add any remaining valid files that weren't in diskOrder (just in case)
+                    validEntries.forEach(entry => {
+                        if (!diskOrder.includes(entry.entryName)) {
+                            filesToUpload.push({ name: entry.entryName, buffer: entry.getData() });
+                        }
+                    });
+                } else {
+                    // Fallback to alphabetical if no order provided
+                    validEntries.sort((a, b) => a.entryName.localeCompare(b.entryName));
+                    validEntries.forEach(entry => {
+                        filesToUpload.push({ name: entry.entryName, buffer: entry.getData() });
                     });
                 }
-            });
-            if (filesToUpload.length === 0) throw new Error("No valid disk images (.qcow2, .img, .iso) found in zip");
-        } else {
-            filesToUpload.push({
-                name: file.name,
-                buffer: buffer
-            });
-        }
 
-        // 2. Create VM (Empty)
-        const createUrl = `${host}/api2/json/nodes/${node}/qemu`;
-        const createParams = new URLSearchParams();
-        createParams.append('vmid', vmConfig.vmid);
-        createParams.append('name', vmConfig.name);
-        createParams.append('memory', vmConfig.memory);
-        createParams.append('cores', vmConfig.cores);
-        createParams.append('net0', 'virtio,bridge=vmbr0,firewall=1');
-        createParams.append('scsihw', 'virtio-scsi-pci');
-        createParams.append('ostype', 'l26');
-
-        const apiHeaders = {
-            'Authorization': `PVEAPIToken=${token}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-        };
-
-        console.log(`Creating VM at ${createUrl}...`);
-        try {
-            await axios.post(createUrl, createParams.toString(), { headers: apiHeaders, httpsAgent: agent });
-        } catch (e: any) {
-            if (e.response?.data?.errors?.vmid) {
-                console.log("VM ID exists, attempting to continue...");
+                if (filesToUpload.length === 0) throw new Error("No valid disk images (.qcow2, .img, .iso) found in zip");
+                await writeLog(`Found ${filesToUpload.length} images in ZIP.`);
             } else {
-                throw new Error(`VM Creation Failed via API: ${e.message}`);
-            }
-        }
-
-        // 3. Upload & Import (Strategy Selection)
-        if (sshHost && sshUser && sshPass) {
-            console.log("SSH Credentials found. Using SSH Strategy for Upload/Import...");
-            const sshConfig = { host: sshHost, user: sshUser, pass: sshPass };
-
-            for (const f of filesToUpload) {
-                const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-                await uploadAndImportViaSSH(sshConfig, f.buffer, cleanName, vmConfig.vmid, vmConfig.storage, node);
-            }
-        } else {
-            console.log("No SSH Credentials. Using API Strategy (Backup)...");
-            const isoStorage = await findIsoStorage(host, node, token);
-
-            for (const f of filesToUpload) {
-                const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-                const uploadUrl = `${host}/api2/json/nodes/${node}/storage/${isoStorage}/upload`;
-
-                const form = new FormData();
-                form.append('content', 'iso');
-                form.append('filename', cleanName);
-                form.append('file', f.buffer, { filename: cleanName });
-
-                const upRes = await axios.post(uploadUrl, form, {
-                    headers: { 'Authorization': `PVEAPIToken=${token}`, ...form.getHeaders() },
-                    httpsAgent: agent,
-                    maxBodyLength: Infinity,
-                    maxContentLength: Infinity
+                filesToUpload.push({
+                    name: fileName,
+                    buffer: fileBuffer
                 });
-
-                if (upRes.status !== 200) throw new Error(`API Upload Failed: ${upRes.status}`);
-
-                const volid = `${isoStorage}:iso/${cleanName}`;
-                const configUrl = `${host}/api2/json/nodes/${node}/qemu/${vmConfig.vmid}/config`;
-                const configParams = new URLSearchParams();
-                configParams.append(`scsi0`, `${vmConfig.storage}:0,import-from=${volid}`);
-                configParams.append('boot', `order=scsi0`);
-                await axios.post(configUrl, configParams.toString(), { headers: apiHeaders, httpsAgent: agent });
             }
+
+            // 2. Create VM (Empty)
+            const createUrl = `${host}/api2/json/nodes/${node}/qemu`;
+            const createParams = new URLSearchParams();
+            createParams.append('vmid', vmConfig.vmid);
+            createParams.append('name', vmConfig.name);
+            createParams.append('memory', vmConfig.memory);
+            createParams.append('cores', vmConfig.cores);
+            createParams.append('net0', 'virtio,bridge=vmbr0,firewall=1');
+            createParams.append('scsihw', 'virtio-scsi-pci');
+            createParams.append('ostype', 'l26');
+
+            const apiHeaders = {
+                'Authorization': `PVEAPIToken=${token}`,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            };
+
+            await writeLog(`Creating VM at ${createUrl}...`);
+            try {
+                await axios.post(createUrl, createParams.toString(), { headers: apiHeaders, httpsAgent: agent });
+                await writeLog('VM Created successfully.');
+            } catch (e: any) {
+                if (e.response?.data?.errors?.vmid) {
+                    await writeLog("VM ID exists, attempting to continue...");
+                } else {
+                    throw new Error(`VM Creation Failed via API: ${e.message}`);
+                }
+            }
+
+            // 3. Upload & Import (Strategy Selection)
+            if (sshHost && sshUser && sshPass) {
+                await writeLog("SSH Credentials found. Using SSH Strategy...");
+                const sshConfig = { host: sshHost, user: sshUser, pass: sshPass };
+
+                // Loop with Index
+                for (let i = 0; i < filesToUpload.length; i++) {
+                    const f = filesToUpload[i];
+                    const cleanName = f.name.substring(f.name.lastIndexOf('/') + 1).replace(/[^a-zA-Z0-9.-]/g, '_'); // basename only
+                    await writeLog(`Processing Disk ${i + 1}/${filesToUpload.length}: ${cleanName}...`);
+
+                    await uploadAndImportViaSSH(sshConfig, f.buffer, cleanName, vmConfig.vmid, vmConfig.storage, node, i);
+                    await writeLog(`Finished ${cleanName}.`);
+                }
+            } else {
+                await writeLog("No SSH Credentials. Using API Strategy (Backup)...");
+                const isoStorage = await findIsoStorage(host, node, token);
+
+                for (let i = 0; i < filesToUpload.length; i++) {
+                    const f = filesToUpload[i];
+                    const cleanName = f.name.substring(f.name.lastIndexOf('/') + 1).replace(/[^a-zA-Z0-9.-]/g, '_');
+                    const uploadUrl = `${host}/api2/json/nodes/${node}/storage/${isoStorage}/upload`;
+
+                    await writeLog(`Uploading ${cleanName} to ${isoStorage}...`);
+
+                    const form = new FormData();
+                    form.append('content', 'iso');
+                    form.append('filename', cleanName);
+                    form.append('file', f.buffer, { filename: cleanName });
+
+                    const upRes = await axios.post(uploadUrl, form, {
+                        headers: { 'Authorization': `PVEAPIToken=${token}`, ...form.getHeaders() },
+                        httpsAgent: agent,
+                        maxBodyLength: Infinity,
+                        maxContentLength: Infinity
+                    });
+
+                    if (upRes.status !== 200) throw new Error(`API Upload Failed: ${upRes.status}`);
+                    await writeLog(`Upload complete. Attaching to VM (scsi${i})...`);
+
+                    const volid = `${isoStorage}:iso/${cleanName}`;
+                    const configUrl = `${host}/api2/json/nodes/${node}/qemu/${vmConfig.vmid}/config`;
+                    const configParams = new URLSearchParams();
+                    // Attach to scsi{i}
+                    configParams.append(`scsi${i}`, `${vmConfig.storage}:0,import-from=${volid}`);
+                    if (i === 0) {
+                        configParams.append('boot', `order=scsi0`);
+                    }
+                    await axios.post(configUrl, configParams.toString(), { headers: apiHeaders, httpsAgent: agent });
+                    await writeLog(`Attached ${cleanName} as scsi${i}.`);
+                }
+            }
+
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'done', success: true, message: 'Deployment Complete' })}\n\n`));
+
+        } catch (error: any) {
+            console.error('Deploy Error:', error);
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`));
+        } finally {
+            // Clean up the uploaded file
+            if (tempFilePath && fs.existsSync(tempFilePath)) {
+                try {
+                    fs.unlinkSync(tempFilePath);
+                    console.log('Cleaned up temp file');
+                } catch (e) {
+                    console.error('Failed to cleanup temp file', e);
+                }
+            }
+            await writer.close();
         }
+    })();
 
-        return NextResponse.json({
-            success: true,
-            message: "VM Created and Disks Imported successfully."
-        });
-
-    } catch (error: any) {
-        console.error('Deploy Error:', error);
-        return NextResponse.json({
-            error: error.message,
-            details: error.response?.data || 'Check Proxmox logs'
-        }, { status: 500 });
-    }
+    return new NextResponse(stream.readable, {
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        },
+    });
 }

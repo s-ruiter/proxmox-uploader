@@ -16,6 +16,7 @@ export default function Settings() {
         sshUsername: sshUsername || '',
         sshPassword: sshPassword || ''
     });
+    const [saveToFile, setSaveToFile] = useState(false);
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
     const [isChecking, setIsChecking] = useState(false);
@@ -103,7 +104,7 @@ export default function Settings() {
             }
         }
 
-        const success = await login({ ...formData, node: nodeToSave });
+        const success = await login({ ...formData, node: nodeToSave }, saveToFile);
 
         if (success) {
             setSuccessMsg('Settings saved and connected!');
@@ -216,6 +217,23 @@ export default function Settings() {
                             />
                         </div>
                     </div>
+                </div>
+
+                {/* Save to File Option */}
+                <div className="glass-panel p-6 flex items-center gap-4">
+                    <input
+                        type="checkbox"
+                        id="saveToFile"
+                        checked={saveToFile}
+                        onChange={(e) => setSaveToFile(e.target.checked)}
+                        className="w-5 h-5 rounded border-white/20 bg-black/20 text-primary focus:ring-primary cursor-pointer"
+                    />
+                    <label htmlFor="saveToFile" className="text-base text-secondary cursor-pointer m-0 normal-case flex-1">
+                        <strong>Save configuration to server file?</strong>
+                        <span className="block text-xs mt-1 opacity-70">
+                            If checked, credentials will be saved to 'proxmox-config.json' on the server for auto-login.
+                        </span>
+                    </label>
                 </div>
 
                 {/* Status Messages */}

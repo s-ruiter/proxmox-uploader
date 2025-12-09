@@ -3,9 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LayoutDashboard, CloudUpload, Settings, Globe } from 'lucide-react';
-import clsx from 'clsx'; // Assuming clsx is installed or I'll implement a helper. A simpler approach is just template literals if clsx is missing, but I installed it via npm install axios swr lucide-react clsx (wait, did I install clsx? I ran `npm install axios swr lucide-react clsx`).
-
-// Checking my previous run_command: "npm install axios swr lucide-react clsx". Yes I did.
+import Logo from './Logo';
 
 const navItems = [
     { name: 'Cluster', href: '/', icon: LayoutDashboard },
@@ -34,6 +32,7 @@ export default function Navbar() {
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '3rem' }}>
                 <div style={{
+                    minWidth: '40px',
                     width: '40px',
                     height: '40px',
                     position: 'relative',
@@ -41,10 +40,12 @@ export default function Navbar() {
                     alignItems: 'center',
                     justifyContent: 'center'
                 }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/logo.png" alt="Proxmox Ctrl" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    <Logo size={40} />
                 </div>
-                <span style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.5px' }}>Proxmox<span style={{ color: 'var(--primary)' }}>Ctrl</span></span>
+                <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.1' }}>
+                    <span style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.5px' }}>Proxmox</span>
+                    <span style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--primary)' }}>VM Uploader</span>
+                </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>

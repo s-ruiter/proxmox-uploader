@@ -13,8 +13,12 @@ export default function Login() {
         host: '',
         node: 'pve',
         username: 'root@pam',
-        token: ''
+        token: '',
+        sshHost: '',
+        sshUsername: '',
+        sshPassword: ''
     });
+    const [saveToFile, setSaveToFile] = useState(false);
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
     const [isChecking, setIsChecking] = useState(false);
@@ -59,7 +63,7 @@ export default function Login() {
             return;
         }
 
-        const success = await login(formData);
+        const success = await login(formData, saveToFile);
 
         if (success) {
             router.push('/');
@@ -71,7 +75,7 @@ export default function Login() {
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'url(/bg.png) no-repeat center center fixed', backgroundSize: 'cover' }}>
-            <div className="glass-panel w-full max-w-md p-8 animate-fade-in relative overflow-hidden">
+            <div className="glass-panel w-full max-w-lg p-8 animate-fade-in relative overflow-hidden my-8">
                 {/* Decorative background orb - reduced opacity for new bg */}
                 <div className="absolute -top-20 -right-20 w-40 h-40 bg-primary opacity-10 blur-3xl rounded-full pointer-events-none"></div>
 
@@ -80,7 +84,7 @@ export default function Login() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                     </div>
-                    <h1 className="text-2xl font-bold">Proxmox Ctrl</h1>
+                    <h1 className="text-2xl font-bold">Proxmox VM Uploader</h1>
                     <p className="text-secondary mt-2">Connect to your cluster</p>
                 </div>
 
@@ -147,6 +151,52 @@ export default function Login() {
                         <p className="text-[10px] text-secondary mt-1">
                             Create at: Datacenter &gt; Permissions &gt; API Tokens
                         </p>
+                    </div>
+
+                    <div className="pt-4 border-t border-white/10">
+                        <label className="text-xs uppercase font-bold tracking-wider text-secondary mb-3">SSH Configuration (Optional)</label>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="SSH Host (IP)"
+                                    value={formData.sshHost}
+                                    onChange={e => setFormData({ ...formData, sshHost: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="SSH User (root)"
+                                    value={formData.sshUsername}
+                                    onChange={e => setFormData({ ...formData, sshUsername: e.target.value })}
+                                />
+                            </div>
+                            <div className="col-span-2">
+                                <input
+                                    type="password"
+                                    className="input"
+                                    placeholder="SSH Password"
+                                    value={formData.sshPassword}
+                                    onChange={e => setFormData({ ...formData, sshPassword: e.target.value })}
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-2">
+                        <input
+                            type="checkbox"
+                            id="saveToFile"
+                            checked={saveToFile}
+                            onChange={(e) => setSaveToFile(e.target.checked)}
+                            className="w-4 h-4 rounded border-white/20 bg-black/20 text-primary focus:ring-primary"
+                        />
+                        <label htmlFor="saveToFile" className="text-sm text-secondary cursor-pointer m-0 normal-case">
+                            Save credentials to server config file
+                        </label>
                     </div>
 
                     {error && (

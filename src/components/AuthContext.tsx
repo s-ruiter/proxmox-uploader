@@ -15,7 +15,7 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-    login: (config: Omit<AuthState, 'isAuthenticated'>) => Promise<boolean>;
+    login: (config: Omit<AuthState, 'isAuthenticated'>, saveToServer?: boolean) => Promise<boolean>;
     logout: () => void;
     testConnection: (config: Omit<AuthState, 'isAuthenticated'>) => Promise<boolean>;
     isLoading: boolean;
@@ -39,19 +39,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
 
     useEffect(() => {
-        // Check local storage on load
-        const saved = localStorage.getItem('proxmox_config');
-        if (saved) {
+        const initAuth = async () => {
+            // 1. Try server-side config first (more persistent)
             try {
-                const parsed = JSON.parse(saved);
-                if (parsed.host && parsed.token) {
-                    setAuth({ ...parsed, isAuthenticated: true });
+                const res = await fetch('/api/config');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.config && data.config.host && data.config.token) {
+                        setAuth({ ...data.config, isAuthenticated: true });
+                        setIsLoading(false);
+                        return;
+                    }
                 }
             } catch (e) {
-                localStorage.removeItem('proxmox_config');
+                console.error("Failed to fetch server config", e);
             }
-        }
-        setIsLoading(false);
+
+            // 2. Fallback to local storage
+            const saved = localStorage.getItem('proxmox_config');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.host && parsed.token) {
+                        setAuth({ ...parsed, isAuthenticated: true });
+                    }
+                } catch (e) {
+                    localStorage.removeItem('proxmox_config');
+                }
+            }
+            setIsLoading(false);
+        };
+
+        initAuth();
     }, []);
 
     const testConnection = async (config: Omit<AuthState, 'isAuthenticated'>) => {
@@ -74,10 +93,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const login = async (config: Omit<AuthState, 'isAuthenticated'>) => {
+    const login = async (config: Omit<AuthState, 'isAuthenticated'>, saveToServer?: boolean) => {
         const success = await testConnection(config);
         if (success) {
             localStorage.setItem('proxmox_config', JSON.stringify(config));
+
+            if (saveToServer) {
+                try {
+                    await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(config)
+                    });
+                } catch (e) {
+                    console.error("Failed to save config to server", e);
+                }
+            }
+
             setAuth({ ...config, isAuthenticated: true });
             return true;
         }
