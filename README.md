@@ -2,6 +2,21 @@
 
 A modern web interface for easily uploading disk images and deploying Virtual Machines to your Proxmox VE server.
 
+## Screenshots
+
+<div align="center">
+
+### Host Overview
+<img src="public/screenshots/host-overview.png" alt="Host Overview" width="800"/>
+
+### Deploy VM
+<img src="public/screenshots/deploy.png" alt="Deploy Page" width="800"/>
+
+### Settings
+<img src="public/screenshots/settings.png" alt="Settings Page" width="800"/>
+
+</div>
+
 ## Docker Deployment
 
 The recommended way to run this application is using Docker.
