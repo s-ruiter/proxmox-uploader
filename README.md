@@ -17,8 +17,8 @@ The recommended way to run this application is using Docker.
 Clone the repository and enter the project directory:
 
 ```bash
-git clone https://github.com/sruiter/proxmox-ctrl.git
-cd proxmox-ctrl
+git clone https://github.com/sruiter/proxmox-uploader.git
+cd proxmox-uploader
 ```
 
 ### 3. Configuration
@@ -57,6 +57,7 @@ You need to create a configuration file to store your Proxmox credentials.
        volumes:
          - ./proxmox-config.json:/app/proxmox-config.json
        restart: always
+       container_name: proxmox-uploader
    ```
 
 2. Start the container:
@@ -75,12 +76,12 @@ If you prefer not to use Docker Compose, you can build and run the container man
 
 ```bash
 # Build the image
-docker build -t proxmox-ctrl .
+docker build -t proxmox-uploader .
 
 # Run the container (mounting the config file)
 docker run -d \
   -p 3000:3000 \
   -v $(pwd)/proxmox-config.json:/app/proxmox-config.json \
-  --name proxmox-ctrl \
-  proxmox-ctrl
+  --name proxmox-uploader \
+  proxmox-uploader
 ```
